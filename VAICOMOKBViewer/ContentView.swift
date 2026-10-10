@@ -1,24 +1,175 @@
-//
-//  ContentView.swift
-//  VAICOMOKBViewer
-//
-//  Created by Matt Hicks on 10/10/2026.
-//
-
 import SwiftUI
 
 struct ContentView: View {
-    var body: some View {
-        VStack {
-            Image(systemName: "globe")
-                .imageScale(.large)
-                .foregroundStyle(.tint)
-            Text("Hello, world!")
-        }
-        .padding()
-    }
-}
+	@EnvironmentObject private var settings: ConnectionSettingsStore
 
-#Preview {
-    ContentView()
+	@State private var reloadToken = UUID()
+	@State private var isLoading = false
+	@State private var errorMessage: String?
+	@State private var showingSettings = false
+	@State private var isInitialConnecting = false
+	@State private var hasConnected = false
+	@State private var initialConnectionToken = UUID()
+	@State private var reconnectLoopToken = UUID()
+
+	var body: some View {
+		let url = settings.dashboardURL
+		let showNoConnectionCard = shouldShowNoConnectionCard(for: url)
+
+		ZStack {
+			if let url = url {
+				WebView(url: url, reloadToken: reloadToken, isLoading: $isLoading, errorMessage: $errorMessage)
+					.ignoresSafeArea()
+			} else {
+				Color(.systemBackground).ignoresSafeArea()
+			}
+
+			if showNoConnectionCard {
+				noConnectionCard
+			}
+
+			overlayView
+
+			VStack {
+				HStack {
+					Spacer()
+					HStack(spacing: 10) {
+						Button {
+							reloadToken = UUID()
+						} label: {
+							Image(systemName: "arrow.clockwise")
+						}
+						.disabled(settings.dashboardURL == nil)
+
+						Button {
+							showingSettings = true
+						} label: {
+							Image(systemName: "gearshape")
+						}
+					}
+					.padding(.horizontal, 12)
+					.padding(.vertical, 10)
+					.background(.thinMaterial)
+					.clipShape(Capsule())
+				}
+				.padding(.top, 10)
+				.padding(.trailing, 12)
+				Spacer()
+			}
+		}
+		.sheet(isPresented: $showingSettings) {
+			SettingsView()
+				.environmentObject(settings)
+		}
+		.onAppear {
+			startReconnectLoop()
+			startInitialConnectionAttempt()
+		}
+		.onChange(of: settings.dashboardURL?.absoluteString ?? "") {
+			hasConnected = false
+			errorMessage = nil
+			startReconnectLoop()
+			startInitialConnectionAttempt()
+		}
+		.onChange(of: isLoading) {
+			if !isLoading, settings.dashboardURL != nil, errorMessage == nil {
+				hasConnected = true
+				isInitialConnecting = false
+			}
+		}
+		.onChange(of: errorMessage) {
+			if errorMessage != nil {
+				hasConnected = false
+			}
+		}
+	}
+
+	@ViewBuilder
+	private var overlayView: some View {
+		if settings.dashboardURL != nil && isInitialConnecting && isLoading {
+			VStack(spacing: 10) {
+				ProgressView()
+				Text("Connecting…")
+					.font(.footnote)
+					.foregroundStyle(.secondary)
+			}
+			.padding(14)
+			.background(.ultraThinMaterial)
+			.clipShape(RoundedRectangle(cornerRadius: 12))
+		}
+	}
+
+	private var noConnectionCard: some View {
+		VStack(spacing: 12) {
+			Image(systemName: "wifi.exclamationmark")
+				.font(.system(size: 34, weight: .semibold))
+			Text("VAICOM OKB Viewer")
+				.font(.headline)
+			Text(settings.dashboardURL == nil ? "Add your host LAN IP and port to start." : "No connection. The app will keep trying using saved settings.")
+				.font(.footnote)
+				.foregroundStyle(.secondary)
+				.multilineTextAlignment(.center)
+			Button("Connection Settings") {
+				showingSettings = true
+			}
+			.buttonStyle(.borderedProminent)
+		}
+		.padding(20)
+		.background(.thinMaterial)
+		.clipShape(RoundedRectangle(cornerRadius: 14))
+		.padding(.horizontal, 24)
+	}
+
+	private func shouldShowNoConnectionCard(for url: URL?) -> Bool {
+		if url == nil {
+			return true
+		}
+
+		if hasConnected {
+			return false
+		}
+
+		if isInitialConnecting {
+			return false
+		}
+
+		return true
+	}
+
+	private func startInitialConnectionAttempt() {
+		guard settings.dashboardURL != nil else {
+			isInitialConnecting = false
+			return
+		}
+
+		isInitialConnecting = true
+		let token = UUID()
+		initialConnectionToken = token
+		reloadToken = UUID()
+
+		DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+			guard initialConnectionToken == token else { return }
+			if !hasConnected {
+				isInitialConnecting = false
+			}
+		}
+	}
+
+	private func startReconnectLoop() {
+		let token = UUID()
+		reconnectLoopToken = token
+		scheduleReconnectTick(token)
+	}
+
+	private func scheduleReconnectTick(_ token: UUID) {
+		DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+			guard reconnectLoopToken == token else { return }
+
+			if settings.dashboardURL != nil && !hasConnected && !isLoading {
+				reloadToken = UUID()
+			}
+
+			scheduleReconnectTick(token)
+		}
+	}
 }
