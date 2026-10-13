@@ -1,0 +1,9 @@
+{
+  "id" : "8c235685-b507-417c-a67f-859e4552bf4b",
+  "targets" : [
+    {
+      "id" : "ea0805a8-4aaf-40a8-9a4e-0d3b833293a9",
+      "name" : "VAICOMOKBViewer"
+    }
+  ]
+}
